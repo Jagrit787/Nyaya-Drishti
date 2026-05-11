@@ -1,0 +1,72 @@
+# --- Git / editor / OS ---
+.git/
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# --- Environment & secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*.json
+google-credentials.json
+google-app-cred.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+ENV/
+Include/
+Lib/
+Scripts/
+share/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Build / test artifacts ---
+dist/
+build/
+out/
+coverage/
+*.lcov
+*.log
+tmp/
+temp/
+
+# --- Notebook / archives / binaries ---
+.ipynb_checkpoints/
+*.sqlite
+*.db
+*.tgz
+*.zip
+*.tar.gz
+
+# --- Keep repository focused on publishable app code ---
+RAG/
+RAG_FRONTEND/
+RAG_BACKEND/
+curated_local/
+downloaded_failures/
+evaluation/
+*.docx
+*.ipynb
+curate_local.py
+download_failures.py
+gemini_rag.py
+proposed_sources.md

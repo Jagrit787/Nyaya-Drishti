@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  --bg:          #0d1117;
+  --surface:     #161b27;
+  --surface2:    #1e2535;
+  --surface3:    #252d3d;
+  --accent:      #6366f1;
+  --accent2:     #8b5cf6;
+  --accent-glow: rgba(99, 102, 241, 0.25);
+  --success:     #10b981;
+  --warning:     #f59e0b;
+  --danger:      #ef4444;
+  --text:        #f9fafb;
+  --text2:       #9ca3af;
+  --text3:       #6b7280;
+  --border:      rgba(255, 255, 255, 0.07);
+  --border2:     rgba(255, 255, 255, 0.12);
+  --radius:      12px;
+  --shadow:      0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ─── Base reset ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  animation: appFadeIn 0.5s ease;
+}
+
+@keyframes appFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* ─── Focus ring (accessibility) ─────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
+}
