@@ -3,8 +3,8 @@ import re
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote, unquote
 from flask import Blueprint, request, jsonify, send_from_directory
-from werkzeug.utils import secure_filename
 from services.orchestrator import route_query
 from services.rag_pipline import query_with_fallback, answer_general, answer_small_talk
 from services.text_formatter import clean_for_display, clean_for_speech
@@ -18,16 +18,26 @@ _DEFAULT_PDF_DIR = Path(__file__).resolve().parents[1] / "data" / "pdfs"
 _PDF_DIR = Path(os.environ.get("PDF_DATA_DIR", str(_DEFAULT_PDF_DIR)))
 _PDF_WHITELIST: set = set()
 _PDF_TOKENS: dict   = {}  # {frozenset_of_tokens: filename}
+_PDF_NORMALIZED: dict = {}  # {normalized_title: filename}
+
+def _normalize_pdf_title(value: str) -> str:
+    """Normalize Gemini titles and local filenames for matching."""
+    name = Path(value or "").name.strip().lower()
+    if name.endswith(".pdf"):
+        name = name[:-4]
+    name = re.sub(r"\s*\(\d+\)\s*$", "", name)
+    name = re.sub(r"[\(\)_\-\.]", " ", name)
+    return re.sub(r"\s+", " ", name).strip()
 
 def _build_pdf_index():
-    global _PDF_WHITELIST, _PDF_TOKENS
+    global _PDF_WHITELIST, _PDF_TOKENS, _PDF_NORMALIZED
     if not _PDF_DIR.exists():
         return
     for p in _PDF_DIR.glob("*.pdf"):
         _PDF_WHITELIST.add(p.name)
-        stem = re.sub(r"[\(\)_\-]", " ", p.stem.lower())
-        stem = re.sub(r"\s+", " ", stem).strip()
-        tokens = frozenset(w for w in stem.split() if len(w) > 2)
+        normalized = _normalize_pdf_title(p.name)
+        _PDF_NORMALIZED[normalized] = p.name
+        tokens = frozenset(w for w in normalized.split() if len(w) > 1)
         _PDF_TOKENS[tokens] = p.name
 
 _build_pdf_index()
@@ -42,13 +52,18 @@ def _find_local_pdf(title: str) -> str | None:
     for name in _PDF_WHITELIST:
         if name.lower() == lower or name.lower() == lower + ".pdf":
             return name
+
+    normalized = _normalize_pdf_title(title)
+    if normalized in _PDF_NORMALIZED:
+        return _PDF_NORMALIZED[normalized]
+
     # Token overlap: pick the file with the most matching tokens (min 2)
-    title_clean = re.sub(r"[\(\)_\-\.]", " ", lower)
-    title_tokens = frozenset(w for w in title_clean.split() if len(w) > 2)
+    title_tokens = frozenset(w for w in normalized.split() if len(w) > 1)
+    min_score = 1 if len(title_tokens) <= 1 else 2
     best_name, best_score = None, 0
     for tokens, fname in _PDF_TOKENS.items():
         score = len(title_tokens & tokens)
-        if score > best_score and score >= 2:
+        if score > best_score and score >= min_score:
             best_score = score
             best_name = fname
     return best_name
@@ -56,13 +71,34 @@ def _find_local_pdf(title: str) -> str | None:
 
 @rag_bp.route("/pdf/<path:filename>", methods=["GET"])
 def serve_pdf(filename):
-    safe_name = secure_filename(filename)
-    if safe_name not in _PDF_WHITELIST:
+    requested = Path(unquote(filename)).name
+    if requested not in _PDF_WHITELIST:
         return jsonify({"error": "not found"}), 404
-    return send_from_directory(str(_PDF_DIR), safe_name, mimetype="application/pdf")
+    return send_from_directory(str(_PDF_DIR), requested, mimetype="application/pdf")
 
 
 # ── Reference extraction ──────────────────────────────────────────────────────
+
+def _extract_page_number(ctx, rag_chunk) -> int | None:
+    """Best-effort extraction of Gemini file-search page metadata."""
+    candidates = (ctx, rag_chunk)
+    for obj in candidates:
+        if not obj:
+            continue
+        for attr in ("page_number", "page", "page_num"):
+            value = getattr(obj, attr, None)
+            if isinstance(value, int) and value > 0:
+                return value
+
+        page_span = getattr(obj, "page_span", None)
+        if page_span:
+            for attr in ("first_page", "start_page", "page_start"):
+                value = getattr(page_span, attr, None)
+                if isinstance(value, int) and value > 0:
+                    return value
+
+    return None
+
 
 def _extract_references(resp):
     """
@@ -102,9 +138,10 @@ def _extract_references(resp):
                 uri     = (getattr(ctx, "uri",  None) or "").strip()
                 # snippet may be in 'text' or inside 'rag_chunk.text'
                 snippet = (getattr(ctx, "text", None) or "").strip()
+                rag_chunk = getattr(ctx, "rag_chunk", None)
                 if not snippet:
-                    rag_chunk = getattr(ctx, "rag_chunk", None)
                     snippet = (getattr(rag_chunk, "text", None) or "").strip() if rag_chunk else ""
+                page_number = _extract_page_number(ctx, rag_chunk)
                 is_web  = uri.startswith("http") and not title
                 log.warning("[refs] ctx chunk — title=%r uri=%r snippet_len=%d", title, uri, len(snippet))
             elif web:
@@ -112,6 +149,7 @@ def _extract_references(resp):
                            getattr(web, "domain", None) or "").strip()
                 uri     = (getattr(web, "uri",    None) or "").strip()
                 snippet = ""
+                page_number = None
                 is_web  = True
                 log.warning("[refs] web chunk — title=%r uri=%r", title, uri)
             else:
@@ -135,7 +173,7 @@ def _extract_references(resp):
                 if matched:
                     kind         = "pdf"
                     pdf_filename = matched
-                    pdf_url      = f"/rag/pdf/{matched}"
+                    pdf_url      = f"/rag/pdf/{quote(matched, safe='')}"
 
             refs.append({
                 "title":        title or uri,
@@ -145,6 +183,7 @@ def _extract_references(resp):
                 "kind":         kind,
                 "pdf_filename": pdf_filename,
                 "pdf_url":      pdf_url,
+                "page_number":  page_number,
             })
 
             if len(refs) >= 5:
@@ -154,6 +193,24 @@ def _extract_references(resp):
         pass
 
     return refs
+
+
+def _grounding_source(resp) -> str:
+    """Return the real source type for Gemini grounding chunks."""
+    try:
+        candidates = getattr(resp, "candidates", None)
+        if not candidates:
+            return "search"
+
+        meta = getattr(candidates[0], "grounding_metadata", None)
+        chunks = getattr(meta, "grounding_chunks", None) if meta else None
+        if not chunks:
+            return "search"
+
+        has_kb = any(getattr(chunk, "retrieved_context", None) for chunk in chunks)
+        return "kb" if has_kb else "search"
+    except Exception:
+        return "search"
 
 
 @rag_bp.route("/query", methods=["POST"])
@@ -187,12 +244,7 @@ def query():
             # short_factual and in_scope_detailed both go through RAG
             resp = query_with_fallback(q, fmt=fmt)
 
-            metadata = getattr(
-                resp.candidates[0] if hasattr(resp, "candidates") and resp.candidates else resp,
-                "grounding_metadata", None
-            )
-            has_chunks = metadata and getattr(metadata, "grounding_chunks", None)
-            source     = "kb" if has_chunks else "search"
+            source     = _grounding_source(resp)
             references = _extract_references(resp)
 
         raw_text = resp.text if hasattr(resp, "text") else str(resp)

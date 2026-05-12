@@ -12,7 +12,15 @@ from google.cloud import texttospeech
 # ========== CONFIG ==========
 API_KEY = os.environ.get("GOOGLE_API_KEY_2", "")
 client = genai.Client(api_key=API_KEY)
-_client = texttospeech.TextToSpeechClient()
+_tts_client = None
+
+
+def _get_tts_client():
+    global _tts_client
+    if _tts_client is None:
+        _tts_client = texttospeech.TextToSpeechClient()
+    return _tts_client
+
 
 VOICE_MAP = {
     "hi": {"language_code": "hi-IN", "voice_name": "hi-IN-Standard-F"},
@@ -392,5 +400,7 @@ def text_to_speech(text: str, lang: str):
         pitch=1,
     )
 
-    response = _client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+    response = _get_tts_client().synthesize_speech(
+        input=synthesis_input, voice=voice, audio_config=audio_config
+    )
     return response.audio_content

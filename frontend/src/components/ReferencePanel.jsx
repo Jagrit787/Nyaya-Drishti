@@ -36,7 +36,7 @@ function HighlightedText({ text, query }) {
 }
 
 // ── PDF page renderer ─────────────────────────────────────────────────────────
-function PdfPreview({ pdfUrl, snippet }) {
+function PdfPreview({ pdfUrl, snippet, initialPage }) {
   const canvasRef  = useRef(null);
   const [pageNum,   setPageNum]  = useState(null);   // best-match page
   const [totalPages, setTotal]   = useState(0);
@@ -82,6 +82,14 @@ function PdfPreview({ pdfUrl, snippet }) {
         const total = doc.numPages;
         if (!cancelled) setTotal(total);
 
+        const pageHint = Number(initialPage);
+        if (Number.isInteger(pageHint) && pageHint >= 1 && pageHint <= total) {
+          if (cancelled) return;
+          setPageNum(pageHint);
+          await renderPage(doc, pageHint);
+          return;
+        }
+
         // ── Find best page by snippet word overlap ──────────────────────
         const searchText   = (snippet || "").slice(0, 200).toLowerCase();
         const searchWords  = searchText.split(/\s+/).filter((w) => w.length > 3);
@@ -108,7 +116,7 @@ function PdfPreview({ pdfUrl, snippet }) {
     })();
 
     return () => { cancelled = true; };
-  }, [pdfUrl, snippet, renderPage]);
+  }, [pdfUrl, snippet, initialPage, renderPage]);
 
   return (
     <div className="rp-pdf-wrapper">
@@ -206,7 +214,11 @@ export default function ReferencePanel({ reference, query, lang = "en", onClose 
           {isPdf ? (
             /* ── PDF rendering mode ── */
             <>
-              <PdfPreview pdfUrl={pdfFullUrl} snippet={reference.snippet} />
+              <PdfPreview
+                pdfUrl={pdfFullUrl}
+                snippet={reference.snippet}
+                initialPage={reference.page_number}
+              />
               {reference.snippet && (
                 <div className="rp-excerpt-section">
                   <p className="rp-excerpt-label">

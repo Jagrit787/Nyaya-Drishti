@@ -98,14 +98,12 @@ def query_with_fallback(query, fmt="detailed"):
         )
     )
 
-    # Check grounding
+    # Check whether file search returned actual KB chunks. Google Search responses
+    # also have grounding chunks, so this must specifically look for retrieved_context.
     metadata = getattr(file_response.candidates[0], "grounding_metadata", None)
-    has_chunks = metadata and getattr(metadata, "grounding_chunks", None)
-    if not has_chunks:
-        return run_search(query, fmt=fmt)
-
-    # Fall back to web search if the KB had nothing useful
-    if "provided" in file_response.text:
+    chunks = getattr(metadata, "grounding_chunks", None) if metadata else None
+    has_kb_chunks = any(getattr(chunk, "retrieved_context", None) for chunk in (chunks or []))
+    if not has_kb_chunks:
         return run_search(query, fmt=fmt)
 
     return file_response
