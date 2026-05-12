@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: nyaya-drishti-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY_2
+        sync: false
+      - key: FILE_SEARCH_STORE_NAME
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
