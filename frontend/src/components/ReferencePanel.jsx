@@ -45,7 +45,17 @@ function PdfPreview({ pdfUrl, snippet, initialPage }) {
 
   const pdfDocRef = useRef(null);   // keep the loaded doc
 
-  const renderPage = useCallback(async (doc, num) => {
+  // Derive highlight words from the snippet (words longer than 3 chars)
+  const highlightWords = useRef([]);
+  useEffect(() => {
+    highlightWords.current = (snippet || "")
+      .toLowerCase()
+      .split(/\s+/)
+      .map((w) => w.replace(/[^a-z0-9]/g, ""))
+      .filter((w) => w.length > 3);
+  }, [snippet]);
+
+  const renderPage = useCallback(async (doc, num, words) => {
     if (!canvasRef.current) return;
     const page     = await doc.getPage(num);
     const viewport = page.getViewport({ scale: 1.4 });
@@ -55,6 +65,34 @@ function PdfPreview({ pdfUrl, snippet, initialPage }) {
     const ctx      = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // ── Overlay text highlights ──────────────────────────────────────────
+    const activeWords = words ?? highlightWords.current;
+    if (activeWords.length > 0) {
+      try {
+        const textContent = await page.getTextContent();
+        ctx.save();
+        for (const item of textContent.items) {
+          if (!item.str?.trim()) continue;
+          const lower = item.str.toLowerCase();
+          if (!activeWords.some((w) => lower.includes(w))) continue;
+
+          // Convert PDF baseline point → canvas coordinates
+          const [cx, cy] = viewport.convertToViewportPoint(
+            item.transform[4],
+            item.transform[5],
+          );
+          const fontSize = Math.abs(item.transform[3]) * viewport.scale;
+          const itemW    = item.width * viewport.scale;
+
+          ctx.fillStyle = "rgba(251, 191, 36, 0.38)";
+          ctx.fillRect(cx, cy - fontSize, itemW, fontSize * 1.25);
+        }
+        ctx.restore();
+      } catch (_) {
+        // Highlight failure is non-fatal; page is still shown
+      }
+    }
   }, []);
 
   const goToPage = async (delta) => {
@@ -62,7 +100,7 @@ function PdfPreview({ pdfUrl, snippet, initialPage }) {
     if (!pdfDocRef.current || next < 1 || next > totalPages) return;
     setLoading(true);
     try {
-      await renderPage(pdfDocRef.current, next);
+      await renderPage(pdfDocRef.current, next, highlightWords.current);
       setPageNum(next);
     } finally {
       setLoading(false);
@@ -86,7 +124,7 @@ function PdfPreview({ pdfUrl, snippet, initialPage }) {
         if (Number.isInteger(pageHint) && pageHint >= 1 && pageHint <= total) {
           if (cancelled) return;
           setPageNum(pageHint);
-          await renderPage(doc, pageHint);
+          await renderPage(doc, pageHint, highlightWords.current);
           return;
         }
 
@@ -106,7 +144,7 @@ function PdfPreview({ pdfUrl, snippet, initialPage }) {
 
         if (cancelled) return;
         setPageNum(bestPage);
-        await renderPage(doc, bestPage);
+        await renderPage(doc, bestPage, highlightWords.current);
       } catch (e) {
         if (!cancelled) setError("Could not load PDF preview.");
         console.error("[PdfPreview]", e);
